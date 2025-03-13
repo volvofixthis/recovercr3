@@ -69,7 +69,7 @@ class Application:
 
         cr3.seek(offset)
 
-        bufsize = 8*MB
+        bufsize = 16 * MB  # Increased buffer size
         log.info(f"Saving {path}, size {size:,d} B")
 
         # Write directly to the output file
@@ -80,9 +80,9 @@ class Application:
                 out.write(buf)
                 size -= k
 
-    def CR3_size(self, cr3, endianess="big"):
-        MAX_CR3_SIZE = 1 * 1024 * 1024 * 1024  # 1GB max size
-        if total_size > MAX_CR3_SIZE:
+    def CR3_size(self, file):
+        total_size = 0
+        MAX_CR3_SIZE = 1 * 1024 * 1024 * 1024  # 1GB max
             log.warning(f"File size exceeded {MAX_CR3_SIZE:,d} B! Likely corrupt data at offset {offset}.")
             total_size = 0
         for index, (offset, name, size) in enumerate(CR3_atoms(cr3, endianess)):
@@ -145,11 +145,11 @@ def parse_args():
         if not args.lastchunk:
             p.error("--lastchunk must not be empty")
 
-    if not args.input.exists():
-        p.error(f"{args.input} does not exist")
+    if args.input.exists() == False:
+        p.error(f"Input file {args.input} does not exist")
 
-    if not args.outdir.is_dir():
-        p.error(f"{args.outdir} is not a directory or not exists")
+    if args.outdir.is_dir() == False:
+        p.error(f"Output directory {args.outdir} does not exist")
 
     if args.verbose:
         log.setLevel(logging.DEBUG)
@@ -189,7 +189,7 @@ or
 
 The size is the total number of bytes of header + data.
 """
-def CR3_atoms(file, endianess="big"):
+def CR3_atoms(file):
     """
     Scans a binary file and yields CR3 atoms.
     """
@@ -224,7 +224,7 @@ CR3_magic  = b'\x00\x00\x00\x18ftypcrx'
 CR3_marker = b'CanonCR3'
 
 
-def CR3_headers(file, totalsize, bufsize=8*MB):
+def CR3_headers(file, totalsize, bufsize=16 * MB):
     """
     Scans a binary file and yield offset where CR3 file may start.
     """
