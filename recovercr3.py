@@ -81,7 +81,10 @@ class Application:
                 size -= k
 
     def CR3_size(self, cr3, endianess="big"):
-        total_size = 0
+        MAX_CR3_SIZE = 1 * 1024 * 1024 * 1024  # 1GB max size
+        if total_size > MAX_CR3_SIZE:
+            log.warning(f"File size exceeded {MAX_CR3_SIZE:,d} B! Likely corrupt data at offset {offset}.")
+            total_size = 0
         for index, (offset, name, size) in enumerate(CR3_atoms(cr3, endianess)):
             if index == 0 and name != b'ftyp':
                 break
@@ -138,7 +141,7 @@ def parse_args():
 
         args.lastchunk = b''
     else:
-        args.lastchunk = bytes(args.lastchunk, encoding='utf-8')
+        lastchunk = self.args.lastchunk
         if not args.lastchunk:
             p.error("--lastchunk must not be empty")
 
