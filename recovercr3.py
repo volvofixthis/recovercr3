@@ -5,6 +5,8 @@ import sys
 import argparse
 import logging
 from pathlib import Path
+from multifilereader import MultiFileReader
+import glob
 
 
 MB = 1024*1024
@@ -19,7 +21,7 @@ def main():
 class Application:
     def __init__(self, args):
         self.args = args
-        self.input_size = args.input.stat().st_size
+        self.input_size = 0
         self.file_id = 1
 
         # Handling logic for maxchunks and lastchunk
@@ -40,7 +42,22 @@ class Application:
         path = self.args.input
         log.info(f"Processing {path}")
         count = 0
-        with path.open('rb') as dump, path.open('rb') as cr3:
+
+        if any(char in str(path) for char in ['*', '?', '[']):
+            filenames = sorted(glob.glob(path))
+            if not filenames:
+                raise FileNotFoundError(f"No files matched the pattern: {path}")
+            dump = MultiFileReader(filenames)
+            cr3 = MultiFileReader(filenames)
+            for filename in filenames:
+                self.input_size += Path(filename).stat().st_size
+        else:
+            path = Path(path)
+            dump = path.open('rb')
+            cr3 = path.open('rb')
+            self.input_size = path.stat().st_size
+
+        with dump, cr3:
             for offset in CR3_headers(dump, self.input_size):
                 log.debug(f"found CR3 header at offset {offset}")
                 cr3.seek(offset)
@@ -82,11 +99,14 @@ class Application:
 
     def CR3_size(self, file):
         total_size = 0
-        MAX_CR3_SIZE = 1 * 1024 * 1024 * 1024  # 1GB max
-            log.warning(f"File size exceeded {MAX_CR3_SIZE:,d} B! Likely corrupt data at offset {offset}.")
-            total_size = 0
-        for index, (offset, name, size) in enumerate(CR3_atoms(cr3, endianess)):
+        MAX_CR3_SIZE = 30 * 1024 * 1024  # 30 mb
+        total_size = 0
+        for index, (offset, name, size) in enumerate(CR3_atoms(file)):
             if index == 0 and name != b'ftyp':
+                break
+
+            if total_size + size > MAX_CR3_SIZE:
+                log.warning(f"File size exceeded {MAX_CR3_SIZE:,d} B! Likely corrupt data at offset {offset}.")
                 break
 
             total_size += size
@@ -95,6 +115,9 @@ class Application:
             if self.CR3_last_chunk(index, name):
                 break
 
+
+
+
         return total_size
 
 
@@ -102,7 +125,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Recover Canon CR3 files from memory dumps")
 
     p.add_argument('--input',
-                   type=Path,
+                   type=str,
                    required=True,
                    help="memory dump",
                    metavar="PATH")
@@ -114,7 +137,7 @@ def parse_args():
     p.add_argument("--ext",
                    type=str,
                    help="file extension without the dot [default %(default)s]",
-                   default="cr3",
+                   default="CR3",
                    metavar="EXT")
     p.add_argument("--numwidth",
                    type=int,
@@ -141,15 +164,8 @@ def parse_args():
 
         args.lastchunk = b''
     else:
-        lastchunk = self.args.lastchunk
         if not args.lastchunk:
             p.error("--lastchunk must not be empty")
-
-    if args.input.exists() == False:
-        p.error(f"Input file {args.input} does not exist")
-
-    if args.outdir.is_dir() == False:
-        p.error(f"Output directory {args.outdir} does not exist")
 
     if args.verbose:
         log.setLevel(logging.DEBUG)
@@ -196,7 +212,7 @@ def CR3_atoms(file):
 
     assert file.seekable()
 
-    while True:
+    for _ in range(20):
         pos  = file.tell()
 
         tmp = file.read(4)
@@ -205,10 +221,10 @@ def CR3_atoms(file):
 
         name = file.read(4)
 
-        tmp = int.from_bytes(tmp, endianess)
+        tmp = int.from_bytes(tmp, 'big')
         if tmp == 1:
             tmp  = file.read(8)
-            size = int.from_bytes(tmp, endianess)
+            size = int.from_bytes(tmp, 'big')
         else:
             size = tmp
 
@@ -233,7 +249,7 @@ def CR3_headers(file, totalsize, bufsize=16 * MB):
     while True:
         pos = file.tell()
         progress = 100 * pos / totalsize
-        log.debug(f"read at {pos:,d} B of {totalsize:,d} B ({progress:0.2f}%)")
+        log.warning(f"read at {pos:,d} B of {totalsize:,d} B ({progress:0.2f}%)")
         buf = file.read(bufsize)
         if not buf:
             break
